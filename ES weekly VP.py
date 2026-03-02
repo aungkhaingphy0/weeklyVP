@@ -101,7 +101,7 @@ def filter_session(df, monday, friday):
     df.index = df.index.tz_convert(TZ_ET)
 
     sess_start = datetime(monday.year, monday.month, monday.day, 18, 0, tzinfo=TZ_ET)
-    sess_end   = datetime(friday.year, friday.month, friday.day, 16, 0, tzinfo=TZ_ET)
+    sess_end   = datetime(friday.year, friday.month, friday.day, 15, 59, tzinfo=TZ_ET)
 
     mask = (df.index >= sess_start) & (df.index < sess_end)
     filtered = df.loc[mask].copy()
