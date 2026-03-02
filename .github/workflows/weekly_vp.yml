@@ -21,8 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r "Weekly VP/requirements.txt"
-          pip install requests  # Added for telegram
+          pip install -r "requirements.txt"
 
       - name: Run ES Weekly VP
         env:
@@ -30,5 +29,4 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          cd "Weekly VP"
-          python "ES weekly VP.py" --telegram
+          python "ES weekly VP.py" --telegram --rows 1000
