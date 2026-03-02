@@ -21,7 +21,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 # Import local telegram utility
-from telegram_notifier import send_telegram_message, format_vp_message
+from telegram_notifier import send_telegram_messages, format_vp_messages
 
 import databento as db
 import numpy as np
@@ -151,13 +151,12 @@ def get_data(api_key, monday, friday):
     return filtered
 
 
-def build_volume_profile(df):
-    """Distribute each bar's volume across its high-low range (matches TradingView).
+def build_volume_profile(df, n_rows=None):
+    """Distribute each bar's volume across its high-low range.
 
-    For each 1-min bar, volume is split evenly among all tick levels
-    from round(low/tick)*tick to round(high/tick)*tick.
-
-    Uses vectorized NumPy operations for speed.
+    If n_rows is None (default), uses TICK_SIZE for per-tick resolution.
+    If n_rows is provided, divides the total price range into n_rows
+    equal-width bins (matches TradingView's 'Number of Rows' layout).
     """
     from collections import defaultdict
     grid = defaultdict(float)
@@ -166,14 +165,31 @@ def build_volume_profile(df):
     lows   = df["low"].values
     vols   = df["volume"].values
 
-    tick_his = np.rint(highs / TICK_SIZE).astype(np.int64)
-    tick_los = np.rint(lows  / TICK_SIZE).astype(np.int64)
-    n_ticks  = np.maximum(tick_his - tick_los + 1, 1)
-    shares   = vols / n_ticks
+    if n_rows is not None:
+        # --- Row-based binning (TradingView style) ---
+        global_low  = lows.min()
+        global_high = highs.max()
+        bin_size = (global_high - global_low) / n_rows
 
-    for i in range(len(df)):
-        for t in range(tick_los[i], tick_his[i] + 1):
-            grid[t * TICK_SIZE] += shares[i]
+        for i in range(len(df)):
+            lo_bin = int(np.floor((lows[i]  - global_low) / bin_size))
+            hi_bin = int(np.floor((highs[i] - global_low) / bin_size))
+            hi_bin = min(hi_bin, n_rows - 1)  # clamp to last bin
+            n_bins = max(hi_bin - lo_bin + 1, 1)
+            share  = vols[i] / n_bins
+            for b in range(lo_bin, hi_bin + 1):
+                price = global_low + (b + 0.5) * bin_size  # bin midpoint
+                grid[round(price, 2)] += share
+    else:
+        # --- Original tick-based binning ---
+        tick_his = np.rint(highs / TICK_SIZE).astype(np.int64)
+        tick_los = np.rint(lows  / TICK_SIZE).astype(np.int64)
+        n_ticks  = np.maximum(tick_his - tick_los + 1, 1)
+        shares   = vols / n_ticks
+
+        for i in range(len(df)):
+            for t in range(tick_los[i], tick_his[i] + 1):
+                grid[t * TICK_SIZE] += shares[i]
 
     profile = pd.Series(grid).sort_index()
     profile.index.name = "price_bin"
@@ -223,6 +239,8 @@ def main():
     parser = argparse.ArgumentParser(description="Weekly Volume Profile (ES)")
     parser.add_argument("--va", type=float, nargs="+", default=[70.0, 68.0],
                         help="Value Area percentage(s) (default: 70 68)")
+    parser.add_argument("--rows", type=int, default=None,
+                        help="Number of rows (bins) for the profile (default: tick-based)")
     parser.add_argument("--telegram", action="store_true",
                         help="Send results to Telegram")
     args = parser.parse_args()
@@ -244,7 +262,11 @@ def main():
 
     # -- Profile ---------------------------------------------
     print(f"\n[*] Building volume profile...")
-    profile = build_volume_profile(df)
+    if args.rows:
+        print(f"  Row layout: {args.rows} rows")
+    else:
+        print(f"  Row layout: tick-based ({TICK_SIZE})")
+    profile = build_volume_profile(df, n_rows=args.rows)
     print(f"  Price levels: {len(profile)}")
 
     # -- Results Storage -------------------------------------
@@ -274,8 +296,8 @@ def main():
             return
 
         print("\n[*] Sending results to Telegram...")
-        message = format_vp_message(monday, friday, SYMBOL, va_results)
-        success = send_telegram_message(bot_token, chat_id, message)
+        messages = format_vp_messages(monday, friday, SYMBOL, va_results)
+        success = send_telegram_messages(bot_token, chat_id, messages)
         
         if success:
             print("  Telegram message sent successfully!")
