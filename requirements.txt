@@ -1,0 +1,4 @@
+databento
+pandas
+numpy
+requests
